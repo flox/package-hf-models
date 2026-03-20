@@ -8,13 +8,13 @@ LLM inference runtimes typically download model weights at startup — from Hugg
 
 Because the Nix store is a shared, content-addressed filesystem, multiple runtimes can serve the same model simultaneously from a single store path — no duplication, no image builds, no network fetches at startup. A vLLM instance, a Triton server, and an SGLang worker can all read from the same `/nix/store/…` directory at the same time without copying weights into separate containers, VM images, or runtime caches.
 
-![Weight Lifecycle: Origin to Serving](weight-lifecycle.svg)
+![Weight Lifecycle: Origin to Serving](docs/weight-lifecycle.svg)
 
 ## Quickstart: package your own model
 
 This walkthrough takes you from a set of HuggingFace model weights to a published, reproducible Nix package.
 
-![Quickstart: Artifacts and Data Flow](quickstart-pipeline.svg)
+![Quickstart: Artifacts and Data Flow](docs/quickstart-pipeline.svg)
 
 ### Step 1 — Download or quantize weights
 
@@ -275,7 +275,7 @@ In the diagram above:
 
 Zero file duplication — both runtimes read from the same snapshot directory.
 
-![Dual Layout: Three Runtimes, One Copy of Weights](dual-layout-topology.svg)
+![Dual Layout: Three Runtimes, One Copy of Weights](docs/dual-layout-topology.svg)
 
 ## The shared builder — `mkHfModel.nix`
 
