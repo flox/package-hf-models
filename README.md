@@ -17,7 +17,7 @@ Before diving into the layouts, here are the HuggingFace and Triton terms used t
 - **Triton model repository** — Triton Inference Server discovers models by scanning a directory for subdirectories that contain a `config.pbtxt` file. Each subdirectory is one servable model.
 - **`config.pbtxt`** — a Protobuf-text configuration file that tells Triton how to serve a model: which backend to use (vLLM in our case), input/output tensor shapes, and streaming configuration.
 - **`model-defaults.json`** — a custom file this repo creates alongside `config.pbtxt`. It holds vLLM engine parameters (GPU memory fraction, max sequence length, data type, etc.) that the runtime reads when launching the model.
-- **`$out`** — in Nix build expressions, `$out` is the output path in the Nix store (e.g. `/nix/store/abc123-vllm-qwen3.5-2b-1.0.0/`). Everything the build produces goes under this path.
+- **`$out`** — in Nix build expressions, `$out` is the output path in the Nix store (e.g. `/nix/store/abc123-phi-4-mini-instruct-fp8-hf-1.0.2/`). Everything the build produces goes under this path.
 
 ## Output layouts
 
@@ -58,24 +58,43 @@ $out/share/models/<tritonModelName>/
 
 Zero file duplication — both runtimes read from the same snapshot directory.
 
+## Weight source — GitHub Releases
+
+Model weights are stored as split tarballs on [GitHub Releases](https://github.com/flox/package-hf-models/releases) in this repo. Each `.nix` file uses [`fetchModelRelease.nix`](.flox/pkgs/fetchModelRelease.nix) to download and extract them at build time via `pkgs.fetchurl`, so builds are fully reproducible on any machine with internet access — no local `/mnt/scratch` paths required.
+
+Each release contains:
+- Split tar parts (`*.tar.part-aa`, `*.tar.part-ab`, ...) at 500 MB each to stay under GitHub's 2 GB per-asset limit
+- A `checksums.sha256` file for verification
+
 ## The shared builder — `mkHfModel.nix`
 
-All standard model packages are built by calling `mkHfModel`. Here's a real example (Qwen3.5-2B, dual layout):
+All standard model packages are built by calling `mkHfModel`. Here's a real example (Phi-3.5-mini-instruct AWQ, dual layout):
 
 ```nix
-{ pkgs, mkHfModel ? pkgs.callPackage ./mkHfModel.nix {} }:
+{ pkgs, mkHfModel ? pkgs.callPackage ./mkHfModel.nix {},
+  fetchModelRelease ? pkgs.callPackage ./fetchModelRelease.nix {} }:
+let
+  buildMeta = builtins.fromJSON (builtins.readFile ../../build-meta/phi-3-5-mini-instruct-awq.json);
+  modelSrc = fetchModelRelease {
+    name = "phi-3-5-mini-instruct-awq-src";
+    parts = [
+      { url = "https://github.com/flox/package-hf-models/releases/download/phi-3-5-mini-instruct-awq-v1.0/phi-3-5-mini-instruct-awq.tar.part-aa"; hash = "sha256-YQu8nJmzaAovCFlqdviPuOgBGahvcSBKAYUBBD1VCTc="; }
+      # ... more parts
+    ];
+  };
+in
 mkHfModel {
-  pname = "vllm-qwen3.5-2b";
-  baseVersion = "1.0.0";
-  buildMeta = builtins.fromJSON (builtins.readFile ../../build-meta/vllm-qwen3-5-2b.json);
-  srcPath = /mnt/scratch/models/inferencing/hub/models--Qwen--Qwen3.5-2B;
-  tritonModelName = "qwen3_5_2b";
+  pname = "vllm-phi-3.5-mini-instruct-awq";
+  baseVersion = "1.0.1";
+  inherit buildMeta;
+  srcPath = "${modelSrc}/models--microsoft--Phi-3.5-mini-instruct-AWQ";
+  tritonModelName = "phi3_5_mini_instruct_awq";
 
   # These two enable dual layout (omit both for single layout):
-  slug = "Qwen--Qwen3.5-2B";
-  snapshotId = "15852e8c16360a2fea060d615a32b45270f8a8fc";
+  slug = "microsoft--Phi-3.5-mini-instruct-AWQ";
+  snapshotId = "d9795a43c4d5249522df7902d274d170c8b7ae6e96eb5c9dfb15f1760b287a17";
 
-  vllmDefaults = { gpu_memory_utilization = 0.85; max_model_len = 4096; dtype = "auto"; };
+  vllmDefaults = { gpu_memory_utilization = 0.85; max_model_len = 4096; dtype = "float16"; quantization = "awq"; };
 };
 ```
 
@@ -83,13 +102,13 @@ mkHfModel {
 
 | Parameter | Required | Description |
 |---|---|---|
-| `pname` | yes | Nix package name (e.g. `"vllm-qwen3.5-2b"`) |
+| `pname` | yes | Nix package name (e.g. `"vllm-phi-3.5-mini-instruct-awq"`) |
 | `baseVersion` | yes | Semantic version (e.g. `"1.0.0"`) |
 | `buildMeta` | yes | Parsed JSON from `build-meta/<name>.json` — provides `build_version` and `git_rev_short` |
-| `srcPath` | yes | Absolute path to model weights on the local build machine |
-| `tritonModelName` | yes | Directory name Triton will see under its model repository (e.g. `"qwen3_5_2b"`) |
+| `srcPath` | yes | Path to model weights (typically from `fetchModelRelease`) |
+| `tritonModelName` | yes | Directory name Triton will see under its model repository (e.g. `"phi3_5_mini_instruct_awq"`) |
 | `vllmDefaults` | no | vLLM engine parameters written to `model-defaults.json` (memory budget, dtype, quantization, etc.) |
-| `slug` | no | HuggingFace slug with `--` separator (e.g. `"Qwen--Qwen3.5-2B"`). Providing this enables the dual layout |
+| `slug` | no | HuggingFace slug with `--` separator (e.g. `"microsoft--Phi-3.5-mini-instruct-AWQ"`). Providing this enables the dual layout |
 | `snapshotId` | no | HuggingFace snapshot commit hash. Required when `slug` is set |
 
 **Layout selection:** If both `slug` and `snapshotId` are provided → dual layout. Otherwise → single layout.
@@ -102,14 +121,10 @@ mkHfModel {
 | `phi-4-mini-instruct-fp8-torchao` | Phi-4-mini-instruct | single | FP8 ([TorchAO](https://github.com/pytorch/ao)) | SM89+ | Triton-only |
 | `phi-4-mini-instruct-fp8-sglang` | Phi-4-mini-instruct | HF-only | FP8 (TorchAO) | SM89+ | Custom build (see below) |
 | `vllm-phi-3-5-mini-instruct-awq` | Phi-3.5-mini-instruct | dual | [AWQ](https://github.com/mit-han-lab/llm-awq) 4-bit | SM75+ | |
-| `vllm-qwen3-5-2b` | Qwen3.5-2B | dual | none (full precision) | SM75+ | |
-| `vllm-qwen3-5-4b-fp8` | Qwen3.5-4B | single | FP8 (TorchAO) | SM89+ | |
-| `vllm-smollm3-3b-fp8` | SmolLM3-3B | single | FP8 (TorchAO) | SM89+ | |
 
 **Quantization types in this repo:**
 - **FP8 (W8A8)** — 8-bit float weights and activations. Two toolchains: PyTorch native and [TorchAO](https://github.com/pytorch/ao).
 - **AWQ (INT4)** — 4-bit integer weights, FP16 activations. Preserves accuracy via salient-weight protection.
-- **none (BF16/FP16)** — unquantized. `dtype = "auto"` resolves to BF16 on SM80+, FP16 on older GPUs.
 
 ### GPU compatibility
 
@@ -189,11 +204,27 @@ Dual-layout packages work for all three runtimes simultaneously from a single st
 
 ## How to add a new model
 
-1. **Download or quantize weights** to `/mnt/scratch/models/inferencing/`.
+1. **Download or quantize weights** to a local staging directory.
    - For dual layout: use the HF cache structure (`hub/models--<org>--<model>/` with `snapshots/` and optionally `blobs/`)
-   - For single layout: use a flat directory (`resolved/<org>--<model>/`) with all symlinks resolved
+   - For single layout: use a flat directory with all symlinks resolved
 
-2. **Create `build-meta/<name>.json`:**
+2. **Create a tarball and publish to GitHub Releases:**
+   ```bash
+   # For flat layout (resolve symlinks if from HF cache):
+   tar -chf - <model-dir>/ | split -b 500M - <name>.tar.part-
+   sha256sum *.tar.part-* > checksums.sha256
+
+   # Publish (requires gh CLI):
+   gh release create <name>-v1.0 *.tar.part-* checksums.sha256 \
+     --repo flox/package-hf-models --title "<title>" --notes "<notes>"
+   ```
+
+3. **Compute Nix SRI hashes** for each part:
+   ```bash
+   for f in *.tar.part-*; do echo "$f $(nix hash file --sri $f)"; done
+   ```
+
+4. **Create `build-meta/<name>.json`:**
    ```json
    {
      "build_version": 1,
@@ -204,41 +235,34 @@ Dual-layout packages work for all three runtimes simultaneously from a single st
    }
    ```
 
-3. **Create `.flox/pkgs/<name>.nix`** calling `mkHfModel` with appropriate parameters. Include `slug` + `snapshotId` for dual layout, omit both for single layout.
+5. **Create `.flox/pkgs/<name>.nix`** using `fetchModelRelease` + `mkHfModel`. Include `slug` + `snapshotId` for dual layout, omit both for single layout.
 
-4. **Build:**
+6. **Build:**
    ```bash
-   flox build -A <name>
+   flox build <name>
    ```
 
-5. **Verify the output layout:**
+7. **Verify the output layout:**
    ```bash
    ls -la result-<name>/share/models/
    ```
 
-6. **Publish:**
+8. **Publish:**
    ```bash
    flox publish
    ```
-
-## Source model locations
-
-Weights live on local scratch storage before packaging:
-
-- **HF cache layout:** `/mnt/scratch/models/inferencing/hub/models--<org>--<model>/` — contains `blobs/` and `snapshots/` directories as created by `huggingface-cli download`. Used for dual-layout packages.
-- **Pre-resolved:** `/mnt/scratch/models/inferencing/resolved/<org>--<model>/` — a flat directory where HF blob symlinks have been resolved to regular files. Used for single-layout packages.
 
 ## Building and publishing
 
 ```bash
 # Build a single package
-flox build -A vllm-qwen3-5-2b
+flox build phi-4-mini-instruct-fp8-hf
 
 # Build all packages
 flox build
 
 # Inspect the result
-ls -la result-vllm-qwen3-5-2b/share/models/
+ls -la result-phi-4-mini-instruct-fp8-hf/share/models/
 
 # Publish to FloxHub
 flox publish
