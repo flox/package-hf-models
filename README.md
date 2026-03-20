@@ -164,39 +164,56 @@ Each Flox runtime has its own model-resolution logic. Install your model package
 
 **vLLM** ([vllm-flox-runtime](https://github.com/flox/vllm-flox-runtime)) — requires dual layout:
 
-Add the package to the runtime's `manifest.toml`:
+Add the package to the runtime's `manifest.toml` and set the model env vars in the `[hook]`. The runtime's default `VLLM_MODEL_SOURCES` is `local,hf-cache,hf-hub` — you must add `flox` to the front so it finds Nix-installed packages at `$FLOX_ENV/share/models/hub/`:
 
 ```toml
 [install]
 my-model.pkg-path = "flox/<package-name>"
 my-model.systems  = ["x86_64-linux"]
+
+[hook]
+on-activate = """
+  export VLLM_MODEL="<Model-Name>"
+  export VLLM_MODEL_ORG="<org>"
+  export VLLM_MODEL_SOURCES="flox,local,hf-cache,hf-hub"
+"""
 ```
 
-Activate with the `flox` source enabled (the runtime's default `VLLM_MODEL_SOURCES` is `local,hf-cache,hf-hub` — you must add `flox` to the front so it finds Nix-installed packages at `$FLOX_ENV/share/models/hub/`):
+Then activate normally:
 
 ```bash
-VLLM_MODEL=<Model-Name> VLLM_MODEL_ORG=<org> VLLM_MODEL_SOURCES=flox,local,hf-cache,hf-hub flox activate
+flox activate
 ```
 
 **SGLang** ([sglang-runtime](https://github.com/flox/sglang-runtime)) — requires dual or HF-only layout:
 
-Add the package to `manifest.toml` the same way, then activate:
+Add the package and model config to `manifest.toml`. No source-chain configuration needed — `sglang-resolve-model` automatically checks `$FLOX_ENV/share/models/hub/` for a matching HF cache snapshot before falling back to a download:
 
-```bash
-SGLANG_MODEL=<org>/<Model-Name> flox activate
+```toml
+[install]
+my-model.pkg-path = "flox/<package-name>"
+my-model.systems  = ["x86_64-linux"]
+
+[hook]
+on-activate = """
+  export SGLANG_MODEL="<org>/<Model-Name>"
+"""
 ```
-
-No source-chain configuration needed — `sglang-resolve-model` automatically checks `$FLOX_ENV/share/models/hub/` for a matching HF cache snapshot before falling back to a download.
 
 **Triton** ([triton-trtllm-flox-runtime](https://github.com/flox/triton-trtllm-flox-runtime)) — any layout:
 
-Add the package to `manifest.toml` the same way, then activate:
+Add the package and model config to `manifest.toml`. The `flox` source is already first in the default `TRITON_MODEL_SOURCES` chain (`flox,local,r2,hf-hub`), so no extra configuration is needed:
 
-```bash
-TRITON_MODEL=<tritonModelName> flox activate
+```toml
+[install]
+my-model.pkg-path = "flox/<package-name>"
+my-model.systems  = ["x86_64-linux"]
+
+[hook]
+on-activate = """
+  export TRITON_MODEL="<tritonModelName>"
+"""
 ```
-
-The `flox` source is already first in the default `TRITON_MODEL_SOURCES` chain (`flox,local,r2,hf-hub`), so no extra configuration is needed.
 
 #### Without a Flox runtime (BYO)
 
