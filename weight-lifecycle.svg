@@ -1,0 +1,108 @@
+<svg viewBox="0 0 960 440" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <style>
+    .heading { font-size: 18px; font-weight: 700; fill: #c9d1d9; }
+    .subheading { font-size: 12px; fill: #8b949e; }
+    .stage-label { font-size: 13px; font-weight: 700; fill: rgba(255,255,255,0.92); }
+    .stage-detail { font-size: 10px; fill: rgba(255,255,255,0.72); }
+    .detail-box-text { font-size: 10px; fill: #8b949e; }
+    .detail-box-title { font-size: 11px; font-weight: 600; fill: #c9d1d9; }
+    .detail-mono { font-size: 9.5px; fill: #8b949e; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+    .arrow-label { font-size: 9px; fill: #484f58; font-weight: 500; }
+  </style>
+
+  <rect width="960" height="440" fill="#0d1117"/>
+
+  <text x="480" y="32" text-anchor="middle" class="heading">Weight Lifecycle: Origin to Serving</text>
+  <text x="480" y="52" text-anchor="middle" class="subheading">How model weights travel from HuggingFace Hub to a running inference endpoint</text>
+
+  <!-- Stage 1: HuggingFace Hub — dusty gold -->
+  <rect x="40" y="80" width="180" height="80" rx="10" fill="#a08e5e"/>
+  <text x="130" y="112" text-anchor="middle" class="stage-label">HuggingFace Hub</text>
+  <text x="130" y="130" text-anchor="middle" class="stage-detail">Upstream model weights</text>
+  <text x="130" y="144" text-anchor="middle" class="stage-detail">(.safetensors, config, tokenizer)</text>
+
+  <rect x="40" y="175" width="180" height="80" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="130" y="195" text-anchor="middle" class="detail-box-title">Source of truth</text>
+  <text x="130" y="212" text-anchor="middle" class="detail-mono">huggingface.co/org/model</text>
+  <text x="130" y="228" text-anchor="middle" class="detail-box-text">Download or quantize locally</text>
+  <text x="130" y="244" text-anchor="middle" class="detail-box-text">before packaging</text>
+
+  <!-- Arrow 1→2 -->
+  <line x1="220" y1="120" x2="258" y2="120" stroke="#484f58" stroke-width="1.5"/>
+  <polygon points="258,114 270,120 258,126" fill="#484f58"/>
+  <text x="244" y="108" text-anchor="middle" class="arrow-label">tar + split</text>
+
+  <!-- Stage 2: GitHub Releases — terracotta -->
+  <rect x="272" y="80" width="180" height="80" rx="10" fill="#b07a5b"/>
+  <text x="362" y="112" text-anchor="middle" class="stage-label">GitHub Releases</text>
+  <text x="362" y="130" text-anchor="middle" class="stage-detail">Versioned distribution layer</text>
+  <text x="362" y="144" text-anchor="middle" class="stage-detail">Split tarballs + checksums</text>
+
+  <rect x="272" y="175" width="180" height="80" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="362" y="195" text-anchor="middle" class="detail-box-title">Content-addressed archive</text>
+  <text x="362" y="212" text-anchor="middle" class="detail-mono">*.tar.part-aa/ab/…</text>
+  <text x="362" y="228" text-anchor="middle" class="detail-box-text">500 MB splits (2 GB limit)</text>
+  <text x="362" y="244" text-anchor="middle" class="detail-mono">checksums.sha256</text>
+
+  <!-- Arrow 2→3 -->
+  <line x1="452" y1="120" x2="490" y2="120" stroke="#484f58" stroke-width="1.5"/>
+  <polygon points="490,114 502,120 490,126" fill="#484f58"/>
+  <text x="476" y="108" text-anchor="middle" class="arrow-label">nix build</text>
+
+  <!-- Stage 3: Nix Store — slate blue -->
+  <rect x="504" y="80" width="180" height="80" rx="10" fill="#6b7d94"/>
+  <text x="594" y="112" text-anchor="middle" class="stage-label">Nix Store</text>
+  <text x="594" y="130" text-anchor="middle" class="stage-detail">Immutable, content-addressed</text>
+  <text x="594" y="144" text-anchor="middle" class="stage-detail">store path for model package</text>
+
+  <rect x="504" y="175" width="180" height="80" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="594" y="195" text-anchor="middle" class="detail-box-title">Reproducible package</text>
+  <text x="594" y="212" text-anchor="middle" class="detail-mono">fetchModelRelease</text>
+  <text x="594" y="228" text-anchor="middle" class="detail-mono">+ mkHfModel</text>
+  <text x="594" y="244" text-anchor="middle" class="detail-box-text">Same hash = same weights, always</text>
+
+  <!-- Arrow 3→4 -->
+  <line x1="684" y1="120" x2="722" y2="120" stroke="#484f58" stroke-width="1.5"/>
+  <polygon points="722,114 734,120 722,126" fill="#484f58"/>
+  <text x="708" y="108" text-anchor="middle" class="arrow-label">mount</text>
+
+  <!-- Stage 4: Runtime Serving — sage green -->
+  <rect x="736" y="80" width="180" height="80" rx="10" fill="#6e8e7a"/>
+  <text x="826" y="112" text-anchor="middle" class="stage-label">Inference Runtime</text>
+  <text x="826" y="130" text-anchor="middle" class="stage-detail">vLLM / Triton / SGLang</text>
+  <text x="826" y="144" text-anchor="middle" class="stage-detail">read directly from store path</text>
+
+  <rect x="736" y="175" width="180" height="80" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="826" y="195" text-anchor="middle" class="detail-box-title">No downloads at startup</text>
+  <text x="826" y="212" text-anchor="middle" class="detail-box-text">No caching surprises</text>
+  <text x="826" y="228" text-anchor="middle" class="detail-box-text">Multiple runtimes share</text>
+  <text x="826" y="244" text-anchor="middle" class="detail-box-text">the same store path</text>
+
+  <!-- Bottom callout bar -->
+  <rect x="40" y="290" width="876" height="60" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+
+  <circle cx="120" cy="320" r="18" fill="#6b7d94" opacity="0.2"/>
+  <text x="120" y="325" text-anchor="middle" font-size="16" fill="#6b7d94">1</text>
+  <text x="160" y="316" class="detail-box-title">Reproducible</text>
+  <text x="160" y="332" class="detail-box-text">Content-addressed at every stage.</text>
+  <text x="160" y="344" class="detail-box-text">Same hash, same weights.</text>
+
+  <circle cx="410" cy="320" r="18" fill="#b07a5b" opacity="0.2"/>
+  <text x="410" y="325" text-anchor="middle" font-size="16" fill="#b07a5b">2</text>
+  <text x="450" y="316" class="detail-box-title">No runtime fetches</text>
+  <text x="450" y="332" class="detail-box-text">Weights are in the store before</text>
+  <text x="450" y="344" class="detail-box-text">the runtime process starts.</text>
+
+  <circle cx="700" cy="320" r="18" fill="#6e8e7a" opacity="0.2"/>
+  <text x="700" y="325" text-anchor="middle" font-size="16" fill="#6e8e7a">3</text>
+  <text x="740" y="316" class="detail-box-title">Shared, not duplicated</text>
+  <text x="740" y="332" class="detail-box-text">Multiple runtimes read the same</text>
+  <text x="740" y="344" class="detail-box-text">store path simultaneously.</text>
+
+  <!-- FloxHub annotation -->
+  <rect x="540" y="365" width="108" height="24" rx="4" fill="#6b7d94" opacity="0.12"/>
+  <text x="594" y="382" text-anchor="middle" font-size="10" font-weight="600" fill="#6b7d94">→ flox publish</text>
+  <line x1="594" y1="365" x2="594" y2="355" stroke="#6b7d94" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="594" y="405" text-anchor="middle" font-size="10" fill="#8b949e">Consumers install from FloxHub;</text>
+  <text x="594" y="418" text-anchor="middle" font-size="10" fill="#8b949e">store path is identical everywhere.</text>
+</svg>

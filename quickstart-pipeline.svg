@@ -1,0 +1,107 @@
+<svg viewBox="0 0 960 520" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <style>
+    .step-label { font-size: 11px; font-weight: 600; fill: rgba(255,255,255,0.9); }
+    .step-title { font-size: 12px; font-weight: 600; fill: rgba(255,255,255,0.82); }
+    .artifact { font-size: 11px; fill: #c9d1d9; font-weight: 500; }
+    .artifact-mono { font-size: 10px; fill: #8b949e; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+    .heading { font-size: 18px; font-weight: 700; fill: #c9d1d9; }
+    .subheading { font-size: 12px; fill: #8b949e; font-weight: 400; }
+  </style>
+
+  <rect width="960" height="520" fill="#0d1117"/>
+
+  <text x="480" y="32" text-anchor="middle" class="heading">Quickstart: Artifacts and Data Flow</text>
+  <text x="480" y="52" text-anchor="middle" class="subheading">Each step produces artifacts that feed forward into later steps</text>
+
+  <!-- Step 1: slate blue -->
+  <rect x="30" y="80" width="140" height="130" rx="8" fill="#6b7d94"/>
+  <text x="100" y="102" text-anchor="middle" class="step-label">STEP 1</text>
+  <text x="100" y="120" text-anchor="middle" class="step-title">Download /</text>
+  <text x="100" y="136" text-anchor="middle" class="step-title">Quantize</text>
+  <rect x="44" y="148" width="112" height="50" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="100" y="168" text-anchor="middle" class="artifact">Model directory</text>
+  <text x="100" y="183" text-anchor="middle" class="artifact-mono">hub/models--org--model/</text>
+
+  <line x1="170" y1="145" x2="195" y2="145" stroke="#6b7d94" stroke-width="2"/>
+  <polygon points="195,139 207,145 195,151" fill="#6b7d94"/>
+
+  <!-- Step 2: terracotta -->
+  <rect x="210" y="80" width="140" height="130" rx="8" fill="#b07a5b"/>
+  <text x="280" y="102" text-anchor="middle" class="step-label">STEP 2</text>
+  <text x="280" y="120" text-anchor="middle" class="step-title">Tarball +</text>
+  <text x="280" y="136" text-anchor="middle" class="step-title">Publish</text>
+  <rect x="224" y="148" width="112" height="50" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="280" y="168" text-anchor="middle" class="artifact">Split tarballs</text>
+  <text x="280" y="183" text-anchor="middle" class="artifact-mono">*.tar.part-aa/ab/…</text>
+
+  <line x1="350" y1="145" x2="375" y2="145" stroke="#b07a5b" stroke-width="2"/>
+  <polygon points="375,139 387,145 375,151" fill="#b07a5b"/>
+
+  <!-- Step 3: dusty gold -->
+  <rect x="390" y="80" width="140" height="130" rx="8" fill="#a08e5e"/>
+  <text x="460" y="102" text-anchor="middle" class="step-label">STEP 3</text>
+  <text x="460" y="120" text-anchor="middle" class="step-title">Compute</text>
+  <text x="460" y="136" text-anchor="middle" class="step-title">SRI Hashes</text>
+  <rect x="404" y="148" width="112" height="50" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="460" y="168" text-anchor="middle" class="artifact">Hash per part</text>
+  <text x="460" y="183" text-anchor="middle" class="artifact-mono">sha256-AAAA…</text>
+
+  <!-- Step 4: dusty gold (same family as step 3) -->
+  <rect x="390" y="270" width="140" height="130" rx="8" fill="#a08e5e"/>
+  <text x="460" y="292" text-anchor="middle" class="step-label">STEP 4</text>
+  <text x="460" y="310" text-anchor="middle" class="step-title">Build Meta</text>
+  <text x="460" y="326" text-anchor="middle" class="step-title">JSON</text>
+  <rect x="404" y="338" width="112" height="50" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="460" y="358" text-anchor="middle" class="artifact">Version tracking</text>
+  <text x="460" y="373" text-anchor="middle" class="artifact-mono">&lt;name&gt;.json</text>
+
+  <!-- Arrow 3→5 -->
+  <line x1="530" y1="145" x2="555" y2="145" stroke="#a08e5e" stroke-width="2"/>
+  <polygon points="555,139 567,145 555,151" fill="#a08e5e"/>
+
+  <!-- Arrow 4→5 -->
+  <line x1="530" y1="335" x2="604" y2="335" stroke="#a08e5e" stroke-width="2"/>
+  <line x1="604" y1="335" x2="604" y2="215" stroke="#a08e5e" stroke-width="2"/>
+  <polygon points="598,215 604,203 610,215" fill="#a08e5e"/>
+
+  <!-- Dashed: GitHub Releases fetch path -->
+  <line x1="280" y1="210" x2="280" y2="240" stroke="#b07a5b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="280" y="258" text-anchor="middle" font-size="9" fill="#b07a5b" font-weight="500">on GitHub Releases</text>
+  <line x1="280" y1="264" x2="280" y2="335" stroke="#b07a5b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="280" y1="335" x2="390" y2="335" stroke="#b07a5b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="335" y="328" text-anchor="middle" font-size="9" fill="#b07a5b" font-weight="500" font-style="italic">fetched at build</text>
+
+  <!-- Step 5: sage green -->
+  <rect x="570" y="80" width="140" height="130" rx="8" fill="#6e8e7a"/>
+  <text x="640" y="102" text-anchor="middle" class="step-label">STEP 5</text>
+  <text x="640" y="120" text-anchor="middle" class="step-title">.nix</text>
+  <text x="640" y="136" text-anchor="middle" class="step-title">Expression</text>
+  <rect x="584" y="148" width="112" height="50" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="640" y="168" text-anchor="middle" class="artifact">Package definition</text>
+  <text x="640" y="183" text-anchor="middle" class="artifact-mono">&lt;name&gt;.nix</text>
+
+  <line x1="710" y1="145" x2="735" y2="145" stroke="#6e8e7a" stroke-width="2"/>
+  <polygon points="735,139 747,145 735,151" fill="#6e8e7a"/>
+
+  <!-- Step 6: slate blue (bookend with step 1) -->
+  <rect x="750" y="80" width="170" height="130" rx="8" fill="#6b7d94"/>
+  <text x="835" y="102" text-anchor="middle" class="step-label">STEP 6</text>
+  <text x="835" y="120" text-anchor="middle" class="step-title">Build + Publish</text>
+  <rect x="764" y="140" width="142" height="58" rx="5" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="835" y="158" text-anchor="middle" class="artifact">Nix store path</text>
+  <text x="835" y="173" text-anchor="middle" class="artifact-mono">/nix/store/…-&lt;name&gt;/</text>
+  <text x="835" y="188" text-anchor="middle" class="artifact-mono">→ FloxHub</text>
+
+  <!-- Legend -->
+  <rect x="30" y="440" width="900" height="60" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <line x1="70" y1="470" x2="110" y2="470" stroke="#8b949e" stroke-width="2"/>
+  <polygon points="110,464 122,470 110,476" fill="#8b949e"/>
+  <text x="132" y="474" font-size="11" fill="#8b949e">Artifact dependency</text>
+
+  <line x1="310" y1="470" x2="350" y2="470" stroke="#b07a5b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <polygon points="350,464 362,470 350,476" fill="#b07a5b"/>
+  <text x="372" y="474" font-size="11" fill="#8b949e">Fetched at build time (not passed directly)</text>
+
+  <rect x="670" y="462" width="14" height="14" rx="3" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="694" y="474" font-size="11" fill="#8b949e">Output artifact</text>
+</svg>
