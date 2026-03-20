@@ -6,6 +6,8 @@ Packages HuggingFace model weights into immutable [Nix store](https://nix.dev/ma
 
 LLM inference runtimes typically download model weights at startup — from HuggingFace Hub, S3, or a shared filesystem. This is slow, non-reproducible, and hard to version. By packaging weights into the Nix store, every deployment gets an identical, content-addressed directory of model files. The same Nix hash always contains exactly the same weights. Runtimes mount the store path directly — no downloads, no caching surprises, no "works on my machine."
 
+Because the Nix store is a shared, content-addressed filesystem, multiple runtimes can serve the same model simultaneously from a single store path — no duplication, no image builds, no network fetches at startup. A vLLM instance, a Triton server, and an SGLang worker can all read from the same `/nix/store/…` directory at the same time without copying weights into separate containers, VM images, or runtime caches.
+
 ## Key concepts
 
 Before diving into the layouts, here are the HuggingFace and Triton terms used throughout:
