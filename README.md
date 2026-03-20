@@ -152,6 +152,62 @@ flox publish
 
 For an end-to-end real example, see [`phi-4-mini-instruct-fp8-hf.nix`](.flox/pkgs/phi-4-mini-instruct-fp8-hf.nix) (single layout) or [`vllm-phi-3-5-mini-instruct-awq.nix`](.flox/pkgs/vllm-phi-3-5-mini-instruct-awq.nix) (dual layout).
 
+### Step 7 — Serve the resultant package
+
+#### With a Flox runtime
+
+Each Flox runtime has its own model-resolution logic. Install your model package, set one or two env vars, and the runtime finds the weights automatically.
+
+**vLLM** ([vllm-flox-runtime](https://github.com/flox/vllm-flox-runtime)) — requires dual layout:
+
+Add the package to the runtime's `manifest.toml`:
+
+```toml
+[install]
+my-model.pkg-path = "flox/<package-name>"
+my-model.systems  = ["x86_64-linux"]
+```
+
+Activate with the `flox` source enabled (the runtime's default `VLLM_MODEL_SOURCES` is `local,hf-cache,hf-hub` — you must add `flox` to the front so it finds Nix-installed packages at `$FLOX_ENV/share/models/hub/`):
+
+```bash
+VLLM_MODEL=<Model-Name> VLLM_MODEL_ORG=<org> VLLM_MODEL_SOURCES=flox,local,hf-cache,hf-hub flox activate
+```
+
+**SGLang** ([sglang-runtime](https://github.com/flox/sglang-runtime)) — requires dual or HF-only layout:
+
+Add the package to `manifest.toml` the same way, then activate:
+
+```bash
+SGLANG_MODEL=<org>/<Model-Name> flox activate
+```
+
+No source-chain configuration needed — `sglang-resolve-model` automatically checks `$FLOX_ENV/share/models/hub/` for a matching HF cache snapshot before falling back to a download.
+
+**Triton** ([triton-trtllm-flox-runtime](https://github.com/flox/triton-trtllm-flox-runtime)) — any layout:
+
+Add the package to `manifest.toml` the same way, then activate:
+
+```bash
+TRITON_MODEL=<tritonModelName> flox activate
+```
+
+The `flox` source is already first in the default `TRITON_MODEL_SOURCES` chain (`flox,local,r2,hf-hub`), so no extra configuration is needed.
+
+#### Without a Flox runtime (BYO)
+
+If you run vLLM, SGLang, or Triton outside of a Flox runtime, point them at the build output directly:
+
+```bash
+# vLLM or SGLang — point at the HF cache tree (dual layout required):
+HF_HUB_CACHE=result-<name>/share/models/hub vllm serve <org>/<Model-Name>
+
+# Triton — point at the model repository (any layout):
+tritonserver --model-repository=result-<name>/share/models
+```
+
+Dual layout is required for vLLM and SGLang (they use HuggingFace's cache resolution internally). Triton works with either layout.
+
 ## Choosing a layout: vLLM vs Triton
 
 vLLM and SGLang expect model files in the **HuggingFace cache layout** — the directory tree that HuggingFace's `huggingface_hub` Python library creates when it downloads a model (`hub/models--<slug>/snapshots/<hash>/`). Triton Inference Server expects a completely different structure — a **model repository** where each model lives in a directory with a `config.pbtxt` file and a `weights/` subdirectory.
@@ -344,14 +400,3 @@ Each package has a corresponding JSON file in `build-meta/` that tracks its vers
 - **Final version string:** `<baseVersion>+<git_rev_short>` (e.g. `1.0.0+ca88e16`). The `baseVersion` comes from the `.nix` file; the git rev is recorded at build time.
 - A marker file is written to `$out/share/<pname>/flox-build-version-<build_version>` so you can identify which build produced a given store path.
 
-## How runtimes consume packages
-
-Each runtime needs just one environment variable or flag to find the packaged model:
-
-| Runtime | Configuration | What it does |
-|---|---|---|
-| **vLLM** | `HF_HUB_CACHE=$out/share/models/hub` | vLLM's HuggingFace integration follows `refs/main` → `snapshots/<hash>` to locate model files |
-| **Triton** | `--model-repository=$out/share/models` | Triton scans for `<tritonModelName>/config.pbtxt` and loads weights from the `weights/` subdirectory |
-| **SGLang** | `HF_HUB_CACHE=$out/share/models/hub` | Same mechanism as vLLM — both use HuggingFace's cache resolution internally |
-
-Dual-layout packages work for all three runtimes simultaneously from a single store path, with no file duplication.
