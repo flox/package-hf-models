@@ -8,26 +8,159 @@ LLM inference runtimes typically download model weights at startup — from Hugg
 
 Because the Nix store is a shared, content-addressed filesystem, multiple runtimes can serve the same model simultaneously from a single store path — no duplication, no image builds, no network fetches at startup. A vLLM instance, a Triton server, and an SGLang worker can all read from the same `/nix/store/…` directory at the same time without copying weights into separate containers, VM images, or runtime caches.
 
-## Key concepts
+## Quickstart: package your own model
 
-Before diving into the layouts, here are the HuggingFace and Triton terms used throughout:
+This walkthrough takes you from a set of HuggingFace model weights to a published, reproducible Nix package.
 
-- **HuggingFace Hub** — the public registry where model authors publish weights. Each model lives at a path like `microsoft/Phi-4-mini-instruct`.
-- **Slug** — a flattened version of the HuggingFace model path with `/` replaced by `--`. For example, `microsoft/Phi-4-mini-instruct` becomes `microsoft--Phi-4-mini-instruct`. HuggingFace's download tools use this format for local cache directories.
-- **Snapshot ID** — a commit hash from HuggingFace Hub that pins a specific version of the model weights. Think of it like a git commit SHA for model files.
-- **HF cache layout** — the directory structure that HuggingFace's `huggingface_hub` Python library creates when it downloads a model. It stores files under `hub/models--<slug>/snapshots/<hash>/`. Tools like vLLM and SGLang use this library internally, so they know how to find models in this layout.
-- **Triton model repository** — Triton Inference Server discovers models by scanning a directory for subdirectories that contain a `config.pbtxt` file. Each subdirectory is one servable model.
-- **`config.pbtxt`** — a Protobuf-text configuration file that tells Triton how to serve a model: which backend to use (vLLM in our case), input/output tensor shapes, and streaming configuration.
-- **`model-defaults.json`** — a custom file this repo creates alongside `config.pbtxt`. It holds vLLM engine parameters (GPU memory fraction, max sequence length, data type, etc.) that the runtime reads when launching the model.
-- **`$out`** — in Nix build expressions, `$out` is the output path in the Nix store (e.g. `/nix/store/abc123-phi-4-mini-instruct-fp8-hf-1.0.2/`). Everything the build produces goes under this path.
+### Step 1 — Download or quantize weights
 
-## Output layouts
+Get the model files into a local staging directory.
 
-The shared builder [`mkHfModel.nix`](.flox/pkgs/mkHfModel.nix) produces one of two directory layouts depending on which parameters are provided.
+- **For dual layout** (serves vLLM, SGLang, *and* Triton from one package): use the HuggingFace cache structure — `hub/models--<org>--<model>/` with a `snapshots/<hash>/` subdirectory containing the actual files.
+- **For single layout** (Triton-only): use a flat directory with all symlinks resolved.
+
+Not sure which layout to pick? See [Choosing a layout](#choosing-a-layout-vllm-vs-triton) below. When in doubt, use dual — it works everywhere.
+
+### Step 2 — Create a tarball and publish to GitHub Releases
+
+Model weights are stored as split tarballs on GitHub Releases (see [Weight source](#weight-source--github-releases) for details). Split at 500 MB to stay under the 2 GB per-asset limit:
+
+```bash
+# Resolve symlinks (-h) and split at 500 MB:
+tar -chf - <model-dir>/ | split -b 500M - <name>.tar.part-
+sha256sum *.tar.part-* > checksums.sha256
+
+# Publish (requires gh CLI):
+gh release create <name>-v1.0 *.tar.part-* checksums.sha256 \
+  --repo flox/package-hf-models --title "<title>" --notes "<notes>"
+```
+
+### Step 3 — Compute Nix SRI hashes
+
+You'll need one hash per split part for the `.nix` file:
+
+```bash
+for f in *.tar.part-*; do echo "$f $(nix hash file --sri $f)"; done
+```
+
+### Step 4 — Create `build-meta/<name>.json`
+
+This file tracks the package's build version independently of git:
+
+```json
+{
+  "build_version": 1,
+  "force_increment": 0,
+  "git_rev": "<current git rev>",
+  "git_rev_short": "<short rev>",
+  "changelog": "Initial package."
+}
+```
+
+### Step 5 — Create `.flox/pkgs/<name>.nix`
+
+This is the Nix expression that assembles everything into a store path. Pick the template that matches your layout.
+
+#### Single layout template (Triton-only)
+
+Use this when only Triton needs to serve the model. Simpler, no HF cache tree.
+
+```nix
+{ pkgs, mkHfModel ? pkgs.callPackage ./mkHfModel.nix {},
+  fetchModelRelease ? pkgs.callPackage ./fetchModelRelease.nix {} }:
+
+let
+  buildMeta = builtins.fromJSON (builtins.readFile ../../build-meta/<NAME>.json);
+
+  modelSrc = fetchModelRelease {
+    name = "<NAME>-src";
+    parts = [
+      { url = "https://github.com/<org>/<repo>/releases/download/<tag>/<name>.tar.part-aa"; hash = "sha256-AAAA..."; }
+      # one entry per split part — paste the hashes from Step 3
+    ];
+  };
+in
+mkHfModel {
+  pname   = "<NAME>";               # Nix package name (e.g. "phi-4-mini-instruct-fp8-hf")
+  baseVersion = "1.0.0";
+  inherit buildMeta;
+  srcPath = "${modelSrc}/<tar-top-level-dir>";    # directory inside the extracted tarball
+  tritonModelName = "<triton_name>";              # Triton model-repository directory name
+
+  vllmDefaults = {
+    gpu_memory_utilization = 0.85;   # fraction of GPU VRAM vLLM may use
+    max_model_len          = 4096;   # max total tokens (prompt + completion)
+    dtype                  = "auto"; # "auto", "float16", "bfloat16"
+    enable_log_requests    = false;
+    # quantization = "awq";          # uncomment if weights are quantized
+  };
+}
+```
+
+#### Dual layout template (vLLM + SGLang + Triton)
+
+Use this when you want one package that works with all three runtimes. Requires two extra fields — `slug` (the HuggingFace model path with `/` replaced by `--`) and `snapshotId` (the HuggingFace commit hash that pins the snapshot).
+
+```nix
+{ pkgs, mkHfModel ? pkgs.callPackage ./mkHfModel.nix {},
+  fetchModelRelease ? pkgs.callPackage ./fetchModelRelease.nix {} }:
+
+let
+  buildMeta = builtins.fromJSON (builtins.readFile ../../build-meta/<NAME>.json);
+
+  modelSrc = fetchModelRelease {
+    name = "<NAME>-src";
+    parts = [
+      { url = "https://github.com/<org>/<repo>/releases/download/<tag>/<name>.tar.part-aa"; hash = "sha256-AAAA..."; }
+      # one entry per split part — paste the hashes from Step 3
+    ];
+  };
+in
+mkHfModel {
+  pname   = "<NAME>";
+  baseVersion = "1.0.0";
+  inherit buildMeta;
+  srcPath = "${modelSrc}/<tar-top-level-dir>";
+  tritonModelName = "<triton_name>";
+
+  # These two fields enable the dual layout (HF cache + Triton):
+  slug       = "<org>--<model>";        # e.g. "microsoft--Phi-3.5-mini-instruct-AWQ"
+  snapshotId = "<hf-commit-hash>";      # e.g. "d9795a43c4d5..."
+
+  vllmDefaults = {
+    gpu_memory_utilization = 0.85;
+    max_model_len          = 4096;
+    dtype                  = "float16";
+    quantization           = "awq";     # match your quantization method
+    enable_log_requests    = false;
+  };
+}
+```
+
+### Step 6 — Build and verify
+
+```bash
+# Build the package:
+flox build <name>
+
+# Inspect the output layout:
+ls -la result-<name>/share/models/
+
+# Publish to FloxHub:
+flox publish
+```
+
+For an end-to-end real example, see [`phi-4-mini-instruct-fp8-hf.nix`](.flox/pkgs/phi-4-mini-instruct-fp8-hf.nix) (single layout) or [`vllm-phi-3-5-mini-instruct-awq.nix`](.flox/pkgs/vllm-phi-3-5-mini-instruct-awq.nix) (dual layout).
+
+## Choosing a layout: vLLM vs Triton
+
+vLLM and SGLang expect model files in the **HuggingFace cache layout** — the directory tree that HuggingFace's `huggingface_hub` Python library creates when it downloads a model (`hub/models--<slug>/snapshots/<hash>/`). Triton Inference Server expects a completely different structure — a **model repository** where each model lives in a directory with a `config.pbtxt` file and a `weights/` subdirectory.
+
+If you only serve via Triton, the **single layout** is simpler — weight files are copied directly into a `weights/` directory under the Triton model name. If you want one package that works with all three runtimes, the **dual layout** creates both structures with zero file duplication: weight files live once in the HF cache tree, and Triton's `weights/` directory is a symlink into it.
 
 ### Single layout (Triton-only)
 
-The simpler layout. Used when only Triton needs to serve the model. Weight files are copied directly into a `weights/` directory:
+Weight files are copied directly into a `weights/` directory:
 
 ```
 $out/share/models/<tritonModelName>/
@@ -40,7 +173,7 @@ Triton scans `$out/share/models/`, finds the `<tritonModelName>/` directory with
 
 ### Dual layout (vLLM + Triton)
 
-Used when both standalone vLLM *and* Triton need to serve the same packaged weights. The builder creates a full HuggingFace cache tree and points Triton at it via symlink — so there's only one copy of the (often multi-gigabyte) weight files:
+The builder creates a full HuggingFace cache tree and points Triton at it via symlink — so there's only one copy of the (often multi-gigabyte) weight files:
 
 ```
 $out/share/models/hub/models--<slug>/
@@ -53,6 +186,11 @@ $out/share/models/<tritonModelName>/
   weights -> ../hub/models--<slug>/snapshots/<snapshotId>   # symlink, not a copy
 ```
 
+In the diagram above:
+- **`$out`** is the Nix store output path (e.g. `/nix/store/abc123-phi-4-mini-instruct-fp8-hf-1.0.2/`).
+- **Slug** is the HuggingFace model path with `/` replaced by `--` (e.g. `microsoft/Phi-4-mini-instruct` → `microsoft--Phi-4-mini-instruct`).
+- **Snapshot ID** is a commit hash from HuggingFace Hub that pins a specific version of the model weights.
+
 **How this works for each runtime:**
 
 - **vLLM / SGLang:** Set the environment variable `HF_HUB_CACHE=$out/share/models/hub`. These runtimes use HuggingFace's library internally, which follows the `refs/main` → `snapshots/<hash>` chain to find model files — exactly as if the model had been downloaded normally.
@@ -60,17 +198,9 @@ $out/share/models/<tritonModelName>/
 
 Zero file duplication — both runtimes read from the same snapshot directory.
 
-## Weight source — GitHub Releases
-
-Model weights are stored as split tarballs on [GitHub Releases](https://github.com/flox/package-hf-models/releases) in this repo. Each `.nix` file uses [`fetchModelRelease.nix`](.flox/pkgs/fetchModelRelease.nix) to download and extract them at build time via `pkgs.fetchurl`, so builds are fully reproducible on any machine with internet access — no local `/mnt/scratch` paths required.
-
-Each release contains:
-- Split tar parts (`*.tar.part-aa`, `*.tar.part-ab`, ...) at 500 MB each to stay under GitHub's 2 GB per-asset limit
-- A `checksums.sha256` file for verification
-
 ## The shared builder — `mkHfModel.nix`
 
-All standard model packages are built by calling `mkHfModel`. Here's a real example (Phi-3.5-mini-instruct AWQ, dual layout):
+All standard model packages are built by calling [`mkHfModel`](.flox/pkgs/mkHfModel.nix). Here's a real example (Phi-3.5-mini-instruct AWQ, dual layout):
 
 ```nix
 { pkgs, mkHfModel ? pkgs.callPackage ./mkHfModel.nix {},
@@ -100,7 +230,7 @@ mkHfModel {
 };
 ```
 
-### Parameters
+### mkHfModel parameters
 
 | Parameter | Required | Description |
 |---|---|---|
@@ -109,11 +239,33 @@ mkHfModel {
 | `buildMeta` | yes | Parsed JSON from `build-meta/<name>.json` — provides `build_version` and `git_rev_short` |
 | `srcPath` | yes | Path to model weights (typically from `fetchModelRelease`) |
 | `tritonModelName` | yes | Directory name Triton will see under its model repository (e.g. `"phi3_5_mini_instruct_awq"`) |
-| `vllmDefaults` | no | vLLM engine parameters written to `model-defaults.json` (memory budget, dtype, quantization, etc.) |
+| `vllmDefaults` | no | vLLM engine parameters written to `model-defaults.json` (see below) |
 | `slug` | no | HuggingFace slug with `--` separator (e.g. `"microsoft--Phi-3.5-mini-instruct-AWQ"`). Providing this enables the dual layout |
 | `snapshotId` | no | HuggingFace snapshot commit hash. Required when `slug` is set |
 
 **Layout selection:** If both `slug` and `snapshotId` are provided → dual layout. Otherwise → single layout.
+
+## `vllmDefaults` reference
+
+The `vllmDefaults` attribute set is serialized to `model-defaults.json` inside the package. The runtime reads this file when launching the model. All fields are optional.
+
+| Parameter | Type | What it does |
+|---|---|---|
+| `gpu_memory_utilization` | float (0–1) | Fraction of GPU VRAM vLLM may use. `0.85` = reserve 15 % for KV-cache overhead. Lower values are safer on small GPUs |
+| `max_model_len` | int | Maximum total sequence length (prompt + completion tokens). Bounded by the model's training context window |
+| `dtype` | string | Weight/activation precision. `"auto"` picks BF16 on SM80+, FP16 on older GPUs. Use `"float16"` to force FP16 |
+| `quantization` | string or null | Quantization method: `"awq"`, `"gptq"`, `"fp8"`. Omit (or `null`) for unquantized models |
+| `enable_log_requests` | bool | Log every incoming request to stderr. Useful for debugging, noisy in production |
+
+These values map directly to vLLM engine constructor arguments. See the [vLLM engine args docs](https://docs.vllm.ai/en/latest/serving/engine_args.html) for the full list.
+
+## Weight source — GitHub Releases
+
+Model weights are stored as split tarballs on [GitHub Releases](https://github.com/flox/package-hf-models/releases) in this repo. Each `.nix` file uses [`fetchModelRelease.nix`](.flox/pkgs/fetchModelRelease.nix) to download and extract them at build time via `pkgs.fetchurl`, so builds are fully reproducible on any machine with internet access — no local `/mnt/scratch` paths required.
+
+Each release contains:
+- Split tar parts (`*.tar.part-aa`, `*.tar.part-ab`, ...) at 500 MB each to stay under GitHub's 2 GB per-asset limit
+- A `checksums.sha256` file for verification
 
 ## Current packages
 
@@ -203,69 +355,3 @@ Each runtime needs just one environment variable or flag to find the packaged mo
 | **SGLang** | `HF_HUB_CACHE=$out/share/models/hub` | Same mechanism as vLLM — both use HuggingFace's cache resolution internally |
 
 Dual-layout packages work for all three runtimes simultaneously from a single store path, with no file duplication.
-
-## How to add a new model
-
-1. **Download or quantize weights** to a local staging directory.
-   - For dual layout: use the HF cache structure (`hub/models--<org>--<model>/` with `snapshots/` and optionally `blobs/`)
-   - For single layout: use a flat directory with all symlinks resolved
-
-2. **Create a tarball and publish to GitHub Releases:**
-   ```bash
-   # For flat layout (resolve symlinks if from HF cache):
-   tar -chf - <model-dir>/ | split -b 500M - <name>.tar.part-
-   sha256sum *.tar.part-* > checksums.sha256
-
-   # Publish (requires gh CLI):
-   gh release create <name>-v1.0 *.tar.part-* checksums.sha256 \
-     --repo flox/package-hf-models --title "<title>" --notes "<notes>"
-   ```
-
-3. **Compute Nix SRI hashes** for each part:
-   ```bash
-   for f in *.tar.part-*; do echo "$f $(nix hash file --sri $f)"; done
-   ```
-
-4. **Create `build-meta/<name>.json`:**
-   ```json
-   {
-     "build_version": 1,
-     "force_increment": 0,
-     "git_rev": "<current git rev>",
-     "git_rev_short": "<short rev>",
-     "changelog": "Initial package."
-   }
-   ```
-
-5. **Create `.flox/pkgs/<name>.nix`** using `fetchModelRelease` + `mkHfModel`. Include `slug` + `snapshotId` for dual layout, omit both for single layout.
-
-6. **Build:**
-   ```bash
-   flox build <name>
-   ```
-
-7. **Verify the output layout:**
-   ```bash
-   ls -la result-<name>/share/models/
-   ```
-
-8. **Publish:**
-   ```bash
-   flox publish
-   ```
-
-## Building and publishing
-
-```bash
-# Build a single package
-flox build phi-4-mini-instruct-fp8-hf
-
-# Build all packages
-flox build
-
-# Inspect the result
-ls -la result-phi-4-mini-instruct-fp8-hf/share/models/
-
-# Publish to FloxHub
-flox publish
-```
